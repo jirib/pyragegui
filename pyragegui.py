@@ -180,9 +180,9 @@ layout = [
         sg.TabGroup(
             [
                 [
-                    sg.Tab('Encrypt', encr_tab),
-                    sg.Tab('Decrypt', decr_tab),
-                    sg.Tab('Identity', identity_tab)
+                    sg.Tab('Identity', identity_tab),
+                    sg.Tab('Encrypt', encr_tab, key='encr_tab'),
+                    sg.Tab('Decrypt', decr_tab)
                 ]
             ]
         )
@@ -355,7 +355,11 @@ def identity_key_update(ident_pubkey):
 
 # main
 if __name__ == "__main__":
-    window = sg.Window("pyragegui", layout, margins=(2, 2), finalize=True)
+    location = sg.Window.get_screen_size()
+    window = sg.Window("pyragegui", layout, margins=(2, 2), finalize=True, location=location)
+    window['encr_tab'].select()
+    window.refresh()
+    window.move_to_center()
 
     while True:
         event, values = window.read()
