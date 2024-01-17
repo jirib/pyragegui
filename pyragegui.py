@@ -4,6 +4,10 @@ import PySimpleGUI as sg
 import pyrage
 from datetime import datetime
 
+recipients_rmenu = ["", ["Paste recipients"]]
+identities_rmenu = ["", ["Paste identities"]]
+
+
 identity_key = [
     [
         sg.Text("", key="-I-K-HEADING-")
@@ -59,7 +63,7 @@ identity_tab = [
     ]
 ]
 
-# TODO:
+# TODO: add passphrase feature
 encr_mode = [
     [
         sg.Push(),
@@ -72,17 +76,19 @@ encr_mode = [
 # for whom to encrypt
 encr_recipient = [
     [
-        sg.Text(
+        sg.Multiline(
             size=(600,5),
-            key="-E-R-RECIPIENT-",
+            key="-RECIPIENTS-",
             background_color='grey',
             text_color='black',
-            font=('Liberation Mono', 10))
+            font=('Liberation Mono', 10),
+            right_click_menu=recipients_rmenu)
     ],
     [
-        sg.Text("Load an existing file with recipients"),
+        sg.Text("Add recipients from one or more existing files"),
         sg.Push(),
-        sg.Button("Load", key="-E-R-BROWSE-")
+        sg.Input(visible=False, enable_events=True, key="-IN-RECIPIENTS-"),
+        sg.FilesBrowse("Load")
     ]
 ]
 
@@ -92,13 +98,13 @@ encr_actions = [
         sg.Text("Select an existing file for encryption")
     ],
     [
-        sg.Input(size=(70,0), key="-E-A-INPUTFILE-"),
+        sg.Input(size=(70,0), enable_events=True, key="-IN-PLAINFILE-"),
         sg.Push(),
-        sg.Button("Browse", key="-E-A-BROWSE-", size=(10,0))
+        sg.FileBrowse("Select", target=("-IN-PLAINFILE-"))
     ],
     [
         sg.Push(),
-        sg.Button("Encrypt", key="-E-A-ENCRYPT-"),
+        sg.Button("Encrypt"),
         sg.Push()
     ]
 ]
@@ -132,12 +138,13 @@ decr_identity = [
         sg.Text('INFO: For privacy reasons, the private key is not fully shown')
     ],
     [
-        sg.Text(
+        sg.Multiline(
             size=(600,5),
-            key="-D-I-KEY-",
+            key="-IDENTITIES-",
             background_color='grey',
             text_color='black',
-            font=('Liberation Mono', 10))
+            font=('Liberation Mono', 10),
+            right_click_menu=identities_rmenu)
     ],
     [
         sg.Text("Load an existing file with key", size=(40,0)),
@@ -190,8 +197,28 @@ layout = [
 ]
 
 
-# TODO: add bytes detection for age files
-# load key file
+def load_recipient(files):
+    """
+    Returns a string if a recipient is found.
+
+        Parameters:
+            files (str): Files separated with semicolon
+
+        Returns:
+            recipient (str): String of a file with recipients
+    """
+
+    _out = [] # helper var
+
+    for filename in files.split(";"):
+        with open(filename, "r") as f:
+            lines = f.readlines()
+            if any([line for line in lines if line.startswith('age1')]):
+                _out.extend([line.strip() for line in lines])
+
+    recipient = "\n".join(_out) if _out else ""
+    return recipient
+
 
 def load_key(filename):
     with open(filename, 'r') as f:
@@ -283,19 +310,29 @@ def save_pubkey(pubkey='', comment='', outfile=''):
         f.write(out)
 
 
-def validate_recipient(recipient_str):
-    print(recipient_str)
-    try:
-        recipient = [
-            pyrage.x25519.Recipient.from_str(x) for x in recipient_str.splitlines() \
-            if x.strip().startswith('age')
-        ]
-        if not recipient:
-            raise Exception()
-        return recipient
-    except Exception as e:
-        sg.popup_cancel(f"No valid recipient found!", title=None)
-        return None
+def valid_recipient(recipient):
+    """
+    Returns a list of recipients.
+
+        Parameters:
+            recipient (str): A string to check if there is a recipient
+
+        Returns:
+            ret (list): List with valid only recipients (Recipient object)
+    """
+
+    ret = list()
+
+    lines = list(l for l in recipient.splitlines() if l.startswith('age1'))
+    if lines:
+        for line in lines:
+            try:
+                ret.append(
+                    pyrage.x25519.Recipient.from_str(line.strip())
+                )
+            except pyrage.RecipientError:
+                pass
+    return ret
 
 
 def validate_identity(identity_str):
@@ -313,16 +350,21 @@ def validate_identity(identity_str):
         return None
 
 
-def encrypt_recipient(recipient=[], input_file=''):
-    try:
-        with open(input_file, 'r+b') as f:
-            encrypted = pyrage.encrypt(f.read(), recipient)
+def encrypt_recipient(recipient, filename):
+    """
+    Encrypts a file to one or more recipients.
 
-        output_file = sg.popup_get_file('', save_as=True, no_window=True)
-        with open(output_file, 'w+b') as f:
-            f.write(encrypted)
-    except Exception as e:
-        sg.popup_cancel(f"Error!\n\n{e}", title=None)
+    Params:
+        recipient (list): List of valid recipients Recipient objects
+
+    Returns:
+        encrypted (bytes): Encrypted bytes
+    """
+
+
+    with open(filename, 'r+b') as f:
+        encrypted = pyrage.encrypt(f.read(), recipient)
+    return encrypted
 
 
 def decrypt_identity(identity=[], input_file=''):
@@ -367,6 +409,15 @@ if __name__ == "__main__":
 
         if event in {sg.WIN_CLOSED, "Exit"}:
             break
+
+
+        if event.startswith("Paste"):
+            text = window["-RECIPIENTS-" if event.endswith("recipients") else "-IDENTITIES-"]
+            text.update(
+                "{}\n{}".format(text.get(), sg.clipboard_get()) if text.get() \
+                else sg.clipboard_get()
+            )
+
 
         #################################################
         ################## IDENTITY #####################
@@ -434,43 +485,44 @@ if __name__ == "__main__":
         ################# ENCRYPTION ####################
         #################################################
 
-        if event == "-E-R-BROWSE-":
-            _f = sg.popup_get_file('', no_window=True)
-
-            if _f:
-                with open(_f, 'r') as f:
-                    # WARNING: no validation yet
-                    recipient = f.read()
-
-                # TODO: allow loading multiple files one by one ??
-                window["-E-R-RECIPIENT-"].update(value=recipient)
-                del(_f)
+        if event == "-IN-RECIPIENTS-":
+            recipient = load_recipient(values["-IN-RECIPIENTS-"])
+            good_recipient = valid_recipient(recipient)
+            if not good_recipient:
+                sg.popup_error("No recipient found!")
+                continue
             else:
+                text = window["-RECIPIENTS-"]
+                text.update(
+                    "{}\n{}".format(text.get(), recipient) if text.get() else recipient
+                )
+                sg.popup(f"{len(good_recipient)} recipients found.", title="")
+
+
+        if event == "Encrypt":
+            # TODO: add passphrase functinality
+            good_recipient = valid_recipient(values["-RECIPIENTS-"])
+
+            if not good_recipient:
+                sg.popup_error("No recipient found!")
                 continue
 
-        if event == "-E-A-BROWSE-":
-            _f = sg.popup_get_file('', no_window=True)
-
-            if _f:
-                encr_file = _f
-                window["-E-A-INPUTFILE-"].update(value=encr_file)
-            else:
+            if not values["-IN-PLAINFILE-"]:
+                sg.popup_error("No files to encrypt are defined!")
                 continue
 
-        if event == "-E-A-ENCRYPT-":
+            encrypted = encrypt_recipient(good_recipient, values["-IN-PLAINFILE-"])
+            outfile = sg.popup_get_file("", save_as=True, no_window=True)
+            try:
+                with open(outfile, "w+b") as f:
+                    f.write(encrypted)
+                sg.popup(f"""Encrypted copy of
+                         {values["-IN-PLAINFILE-"]}
+                         was save to
+                         {outfile}""")
+            except:
+                sg.popup_error("Error to save the file!")
 
-            # TODO: allow manual input
-            if recipient and encr_file:
-                recipient = validate_recipient(recipient)
-
-                if not recipient:
-                    continue
-
-                encrypt_recipient(recipient=recipient, input_file=encr_file)
-
-            else:
-                # popup warning???
-                pass
 
         #################################################
         ################# DECRYPTION ####################
