@@ -405,18 +405,10 @@ if __name__ == "__main__":
 
     while True:
         event, values = window.read()
-        print("Event: ", event, "    Values: ", values)
+        # print("Event: ", event, "    Values: ", values)
 
         if event in {sg.WIN_CLOSED, "Exit"}:
             break
-
-
-        if event.startswith("Paste"):
-            text = window["-RECIPIENTS-" if event.endswith("recipients") else "-IDENTITIES-"]
-            text.update(
-                "{}\n{}".format(text.get(), sg.clipboard_get()) if text.get() \
-                else sg.clipboard_get()
-            )
 
 
         #################################################
@@ -485,6 +477,21 @@ if __name__ == "__main__":
         ################# ENCRYPTION ####################
         #################################################
 
+        if event == "Paste recipients":
+            text = window["-RECIPIENTS-"]
+            clipboard = sg.clipboard_get()
+            good_recipient = valid_recipient(clipboard)
+            if good_recipient:
+                text.update(
+                    "{}\n{}".format(text.get(), clipboard) \
+                    if text.get() else clipboard
+                )
+                sg.popup(f"{len(good_recipient)} recipients pasted.", title="")
+
+            else:
+                sg.popup_error("No recipient found!")
+
+
         if event == "-IN-RECIPIENTS-":
             recipient = load_recipient(values["-IN-RECIPIENTS-"])
             good_recipient = valid_recipient(recipient)
@@ -516,10 +523,7 @@ if __name__ == "__main__":
             try:
                 with open(outfile, "w+b") as f:
                     f.write(encrypted)
-                sg.popup(f"""Encrypted copy of
-                         {values["-IN-PLAINFILE-"]}
-                         was save to
-                         {outfile}""")
+                sg.popup("Encryption done.")
             except:
                 sg.popup_error("Error to save the file!")
 
