@@ -15,15 +15,20 @@ identity_key = [
     [
         sg.Text(
             "No key",
-            key="-I-K-PUBKEY-",
+            key="-PUBKEY-",
             size=(600,5),
             background_color='grey',
             text_color='black',
-            font=('Liberation Mono', 10))
+            font=('Liberation Mono', 10),
+            enable_events=True)
     ],
     [
+        sg.Input(visible=False, key="-KEY-"),
+    ],
+
+    [
         sg.Text("Key comment:", size=(15,0)),
-        sg.InputText(size=(600, 0), key="-I-K-COMMENT-")
+        sg.InputText(size=(600, 0), key="-COMMENT-")
     ],
     [
         sg.Text("Key passphrase:", size=(15,0)),
@@ -39,17 +44,18 @@ identity_actions = [
     [
         sg.Text("Generate a public/private X25519 key pair", size=(40,0)),
         sg.Push(),
-        sg.Button("Generate", key="-I-A-GENERATE-")
+        sg.Button("Generate")
     ],
     [
         sg.Text("Load an existing private X25519 key file", size=(40,0)),
         sg.Push(),
-        sg.Button("Load", key="-I-A-LOAD-")
+        sg.Input(visible=False, enable_events=True, key="-LOADKEY-"),
+        sg.FileBrowse("Load")
     ],
     [
         sg.Text("Save the generated key", size=(40,0)),
         sg.Push(),
-        sg.Button("Save public key", key="-I-A-SAVEPUB-"),
+        sg.Button("Save public key"),
         sg.Button("Save private key", key="-I-A-SAVEPRIVATE-")
     ]
 ]
@@ -74,6 +80,9 @@ encr_mode = [
 ]
 
 # for whom to encrypt
+recipient_text = """Write manually, paste from clipboard or load recipients from an exixting file.
+Only commented out, empty lines and ones with valid recipients are accepted."""
+
 encr_recipient = [
     [
         sg.Multiline(
@@ -82,7 +91,8 @@ encr_recipient = [
             background_color='grey',
             text_color='black',
             font=('Liberation Mono', 10),
-            right_click_menu=recipients_rmenu)
+            right_click_menu=recipients_rmenu,
+            tooltip=recipient_text)
     ],
     [
         sg.Text("Add recipients from one or more existing files"),
@@ -220,61 +230,83 @@ def load_recipient(files):
     return recipient
 
 
-def load_key(filename):
-    with open(filename, 'r') as f:
-        try:
-            input = f.readlines()
-            # WARNING: only first key found will be used!
-            key_str = [x.strip() for x in input if x.startswith("AGE-SECRET-KEY-")][0]
-            try:
-                ident = pyrage.x25519.Identity.from_str(key_str)
-                pubkey = str(ident.to_public())
-                comments = "\n".join([
-                    x.strip() for x in input \
-                    if not (x.strip().startswith("AGE-SECRET-KEY-") or x.strip().endswith(pubkey))
-                ])
-                return ident, "{}{}".format(
-                    f"{comments}\n" if comments else f"",
-                    pubkey
-                )
-            except IdentityError:
-                return None
-        except UnicodeDecodeError:
-                pass
+def load_keys(data, all=False):
+    """
+    Loads keys from data.
 
-    with open(filename, 'r+b') as b:
-        def ask_pass():
-            ret = sg.popup_get_text("Enter passphrase: ",
-                password_char = "*"
-            )
-            return ret
+    Params:
 
-        try:
-            out = pyrage.passphrase.decrypt(
-                b.read(),
-                ask_pass()
-            )
-            input = out.decode('utf-8').splitlines()
+        data (bytes): Data for the key.
 
-            # WARNING: only first key found will be used!
-            ident = pyrage.x25519.Identity.from_str(
-                [
-                    x.strip() for x in out.decode('utf-8').splitlines() \
-                    if x.strip().startswith('AGE-SECRET-KEY-')][0]
-            )
-            pubkey = str(ident.to_public())
-            comments = "\n".join([
-                x.strip() for x in input \
-                if not (x.strip().startswith('AGE-SECRET-KEY-') or x.strip().endswith(pubkey))
-            ])
-            return ident, "{}{}".format(
-                f"{comments}\n" if comments else f"",
-                pubkey
-            )
-        except pyrage.DecryptError as e:
-            sg.popup_cancel(f"Could not decrypt the key!\n\n{e}", title=None)
-            return None, None
+    Returns:
 
+        keys (list): A list of dicts with 'key' and 'pubkey' keys
+    """
+
+    keys = []
+
+    # TODO: add comments before each private key if found
+
+    found = [
+        bytes.decode(x, encoding="utf-8") for x in data.splitlines() \
+            if bytes.decode(x, encoding="utf-8").startswith("AGE-SECRET-KEY-")
+    ]
+
+    for i, v in enumerate(found):
+        # private key
+        keys.insert(
+            i, {
+                "key": str(pyrage.x25519.Identity.from_str(v)),
+                "pubkey": str(pyrage.x25519.Identity.from_str(v).to_public())
+                }
+        )
+
+    return keys
+
+
+def detect_age(data):
+    """
+    Detects if input data are encrypted with age.
+
+    Params:
+
+        data (bytes): Input data
+
+    Returns:
+
+        type (str): Type of age file or None
+    """
+
+    type = None
+    # TODO: add more detection
+    try:
+        if bytes.decode(
+                data.splitlines()[-1],
+                encoding="utf-8").startswith("AGE-SECRET-KEY-"):
+            # plain text age key
+            return "plain"
+    except UnicodeDecodeError: # mimics magic crypt definitions
+        if data.splitlines()[0] == b"age-encryption.org/v1": # encrypted file
+            if data[25:31] == b"scrypt": # passphrase encrypted
+                return "scrypt"
+
+
+def decr_passphrase(ciphertext, passphrase):
+    """
+    Decrypts a encrypted text (bytes) and returns bytes.
+
+    Params:
+
+        ciphertext (bytes): Encrypted content
+        passphrase (string): passphrase
+
+    Returns:
+        decrypted (bytes): Decrypted data
+
+    """
+
+    decrypted = pyrage.passphrase.decrypt(ciphertext, passphrase)
+    return decrypted
 
 
 def save_private(ident=None, comment='', passphrase='', outfile=''):
@@ -298,16 +330,31 @@ def save_private(ident=None, comment='', passphrase='', outfile=''):
             f.write(out)
 
 
-def save_pubkey(pubkey='', comment='', outfile=''):
-    comment = f"# {comment}\n" if comment else ""
+def save_pubkey(pubkey, filename, comment):
+    """
+    Saves a public key, optionally with a defined comment.
 
+    Params:
+
+        pubkey (str): A string of a public key
+
+    Returns:
+        e (string): Exception
+    """
+
+    e = ""
+
+    comment = f"# {comment}\n" if comment else ""
     out = "{}{}\n".format(
         comment,
         pubkey
     )
 
-    with open(outfile, "wt", encoding="utf-8") as f:
-        f.write(out)
+    try:
+        with open(filename, "wt", encoding="utf-8") as f:
+            f.write(out)
+    except Exception as e:
+        return e
 
 
 def valid_recipient(recipient):
@@ -389,10 +436,24 @@ def obfuscale_key(ident):
     return f"{prefix}{start}{stars}{end}"
 
 
-def identity_key_update(ident_pubkey):
-    heading_str = "Public key for share with other users:"
-    window["-I-K-HEADING-"].update(value=heading_str)
-    window["-I-K-PUBKEY-"].update(value=ident_pubkey)
+def generate_key():
+    """
+    Generates a x25519 key.
+
+    Returns:
+        key (dict): A dict with 'key' and 'pubkey' keys
+    """
+
+    key = {}
+
+    key["key"] = str(pyrage.x25519.Identity.generate())
+    key["pubkey"] = str(
+        pyrage.x25519.Identity.from_str(key["key"]).to_public()
+    )
+    return key
+
+
+
 
 
 # main
@@ -403,9 +464,14 @@ if __name__ == "__main__":
     window.refresh()
     window.move_to_center()
 
+    # test
+    multiline = window['-RECIPIENTS-']
+    widget = multiline.Widget
+    widget.tag_config('COMMENT', foreground='grey')
+
     while True:
         event, values = window.read()
-        # print("Event: ", event, "    Values: ", values)
+        #print("Event: ", event, "    Values: ", values)
 
         if event in {sg.WIN_CLOSED, "Exit"}:
             break
@@ -416,41 +482,49 @@ if __name__ == "__main__":
         #################################################
 
         ##### actions #####
-        if event == "-I-A-GENERATE-":
-            ident_ident = pyrage.x25519.Identity.generate()
-            ident_pubkey = str(ident_ident.to_public())
-            ident_pubkey = ident_pubkey if not values["-I-K-COMMENT-"] \
-                else "# {}\n{}\n".format(values["-I-K-COMMENT-"], ident_pubkey)
-            identity_key_update(ident_pubkey)
+        if event == "Generate":
+            key = generate_key()
+            pubtext = window["-PUBKEY-"]
+            keytext = window["-KEY-"]
+            for k, v in key.items():
+                window[f"-{k.upper()}-"].update(v)
 
 
-        if event == "-I-A-LOAD-":
-            _f = sg.popup_get_file('', no_window=True)
+        if event == "-LOADKEY-":
+            with open(values["-LOADKEY-"], "r+b") as f:
+                data = f.read()
+                type = detect_age(data)
 
-            if _f:
-                ident_file = _f
-                ident_ident, ident_pubkey = load_key(ident_file)
-                if not ident_ident:
-                    continue
-                window["-I-K-PUBKEY-"].update(value=ident_pubkey)
-                del(_f)
-            else:
-                continue
+            if not type == "plain": # encrypted key found!
+                askpass = sg.popup_get_text("Enter passphrase: ", password_char="*")
+                while True:
+                    decrypted = decr_passphrase(data, askpass)
+                    if decrypted:
+                        data = decrypted
+                        break
 
-        if event == "-I-A-SAVEPUB-":
-            if ident_ident and ident_pubkey:
-                _f = sg.popup_get_file('', save_as=True, no_window=True)
+            _keys = load_keys(data)[0] # here use only one key!
+            key = _keys["key"]
+            pubkey = _keys["pubkey"]
+            window["-PUBKEY-"].update(pubkey)
+            window["-KEY-"].update(key)
 
-                if _f:
-                    ident_pubfile = _f
-                    del(_f)
-                    save_pubkey(
-                        pubkey_str=str(ident_ident.to_public()),
-                        comment=values["-I-K-COMMENT-"],
-                        outfile=ident_pubfile
+
+        if event == "Save public key":
+            if window["-PUBKEY-"].get():
+                filename = sg.popup_get_file('', save_as=True, no_window=True)
+
+                if filename:
+                    err = save_pubkey(
+                        window["-PUBKEY-"].get(),
+                        filename,
+                        values["-COMMENT-"] if values["-COMMENT-"] else ""
                     )
-                else:
-                    continue
+                    if err:
+                        sg.popup_error(err, title="")
+                    else:
+                        sg.popup("Public key was saved.")
+
 
         if event == "-I-A-SAVEPRIVATE-":
             print('XXX', type(ident_ident))
