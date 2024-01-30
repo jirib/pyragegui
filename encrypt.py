@@ -33,50 +33,72 @@ def encrypt_recipient(recipient, filename):
         encrypted = pyrage.encrypt(f.read(), recipient)
     return encrypted
 
-
-def load_recipient(files):
+def load_recipients(files):
     """
-    Returns a string if a recipient is found.
+    wrapper
+
+    Parameters:
+
+        files (str): Paths separated with semicolon
+    
+    Returns:
+
+        recipients (str): Text with comments (max one) and recipients
+    """
+
+    text = [] # lines of text
+
+    for file in files.split(";"):
+        try:
+            with open(file, "r") as f:
+                text.extend(f.readlines())
+        except Exception:
+            # TODO: logging
+            pass
+    
+    recipients = get_recipients("\n".join(text))
+    return recipients
+
+
+def get_recipients(lines):
+    """
+    Finds recipients public keys and if a comment exists right above the key,
+    it is used (a hard guess).
 
         Parameters:
-            files (str): Files separated with semicolon
+
+            lines (str): Text to search for recipients/comments
 
         Returns:
-            recipient (str): String of a file with recipients
+
+            recipients (str): Text with comments (optional) and recipients'
+                              public keys
     """
 
-    _out = [] # helper var
+    recipients = ""
+    comments = []
 
-    for filename in files.split(";"):
-        with open(filename, "r") as f:
-            lines = f.readlines()
-            if any([line for line in lines if line.startswith('age1')]):
-                _out.extend([line.strip() for line in lines])
-
-    recipient = "\n".join(_out) if _out else ""
-    return recipient
-
-
-def valid_recipient(recipient):
-    """
-    Returns a list of recipients.
-
-        Parameters:
-            recipient (str): A string to check if there is a recipient
-
-        Returns:
-            ret (list): List with valid only recipients (Recipient object)
-    """
-
-    ret = list()
-
-    lines = list(l for l in recipient.splitlines() if l.startswith('age1'))
-    if lines:
-        for line in lines:
+    prefixes = ["#", "age1"] # lines to consider
+    for line in [x.strip() for x in lines.splitlines() \
+                 if x.startswith(tuple(prefixes))]:
+        if line.startswith("#"):
+            comments.append(line)
+            continue
+        elif line.startswith("age1"):
             try:
-                ret.append(
-                    pyrage.x25519.Recipient.from_str(line.strip())
-                )
-            except pyrage.RecipientError:
-                pass
-    return ret
+                pubkey = str(pyrage.x25519.Recipient.from_str(line))
+                # hard guess, only the comment right above the public key!
+                if comments:
+                    recipients = "{}{}{}".format(
+                        f"{recipients}\n" if recipients else "",
+                        f"{comments[-1]}\n" if comments else "",
+                        f"{pubkey}"
+                    )
+            except RecipientError: # line starting with 'age1' is not a pubkey
+                continue
+            finally:
+                comments = [] # clear
+        else:
+            continue # ignore everything else
+
+    return recipients

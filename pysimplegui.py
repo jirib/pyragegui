@@ -101,7 +101,7 @@ encr_recipient = [
     [
         sg.Text("Add recipients from one or more existing files"),
         sg.Push(),
-        sg.Input(visible=False, enable_events=True, key="-IN-RECIPIENTS-"),
+        sg.Input(visible=False, enable_events=True, key="-RECIPIENTS-LOAD-"),
         sg.FilesBrowse("Load")
     ]
 ]
@@ -363,33 +363,40 @@ def main():
         ################# ENCRYPTION ####################
         #################################################
 
+        # TODO: localize right click menu text
         if event == "Paste recipients":
             text = window["-RECIPIENTS-"]
             clipboard = sg.clipboard_get()
-            good_recipient = valid_recipient(clipboard)
-            if good_recipient:
+            recipients = get_recipients(clipboard)
+            if recipients:
                 text.update(
-                    "{}\n{}".format(text.get(), clipboard) \
-                    if text.get() else clipboard
+                    f"{text.get()}\n{recipients}" if text.get() else recipients
                 )
-                sg.popup(f"{len(good_recipient)} recipients pasted.", title="")
+                found_int = len(
+                    [x for x in recipients.splitlines() if x.startswith("age1")]
+                )
+                sg.popup(f"{found_int} recipients pasted.", title="")
 
             else:
                 sg.popup_error("No recipient found!")
 
 
-        if event == "-IN-RECIPIENTS-":
-            recipient = load_recipient(values["-IN-RECIPIENTS-"])
-            good_recipient = valid_recipient(recipient)
-            if not good_recipient:
-                sg.popup_error("No recipient found!")
+        if event == "-RECIPIENTS-LOAD-":
+            recipients = load_recipients(values["-RECIPIENTS-LOAD-"])
+            if not recipients:
+                sg.popup_error("No recipients' public keys found!")
                 continue
             else:
                 text = window["-RECIPIENTS-"]
                 text.update(
-                    "{}\n{}".format(text.get(), recipient) if text.get() else recipient
+                    "{}\n{}".format(text.get(), recipients) if text.get() else recipients
                 )
-                sg.popup(f"{len(good_recipient)} recipients found.", title="")
+                found_int = len(
+                    [x for x in recipients.splitlines() if x.startswith("age1")]
+                )
+                sg.popup(
+                    f"{found_int} recipients found.", title="")
+
 
         encr_modes = ["-ENCRYPT-PASSPHRASE-", "-ENCRYPT-RECIPIENT-"]
         if event in encr_modes:
