@@ -25,7 +25,7 @@ identity_key = [
             enable_events=True)
     ],
     [
-        sg.Input(key="-KEYDATA-", visible=False),
+        sg.Input(key="-KEYDATA-", visible=False, enable_events=True),
     ],
     [
         sg.Input(key="-PUBKEY-", visible=False),
@@ -77,8 +77,8 @@ identity_tab = [
 encr_mode = [
     [
         sg.Push(),
-        sg.Radio("Passphrase", "ENCR_MODE", default=False, key="-ENCRYPT-PASSPHRASE-", enable_events=True),
-        sg.Radio("Recipient", "ENCR_MODE", default=True, key="-ENCRYPT-RECIPIENT-", enable_events=True),
+        sg.Radio("Passphrase", "ENCR_MODE", default=False, key="-ENCRYPT-PASSPHRASE-RADIO-", enable_events=True),
+        sg.Radio("Recipient", "ENCR_MODE", default=True, key="-ENCRYPT-RECIPIENT-RADIO-", enable_events=True),
         sg.Push()
     ]
 ]
@@ -122,9 +122,9 @@ encr_actions = [
         sg.Text("Select an existing file for encryption")
     ],
     [
-        sg.Input(size=(70,0), enable_events=True, key="-IN-PLAINFILE-"),
+        sg.Input(size=(70,0), enable_events=True, key="-PLAINFILE-"),
         sg.Push(),
-        sg.FileBrowse("Select", target=("-IN-PLAINFILE-"))
+        sg.FileBrowse("Select", target=("-PLAINFILE-"))
     ],
     [
         sg.Push(),
@@ -138,8 +138,8 @@ encr_tab = [
         sg.Frame('Modes', layout=encr_mode, size=(600,45))
     ],
     [
-        sg.Frame('Recipient', layout=encr_recipient, key="-RECIPIENT-", size=(600,170)),
-        sg.Frame("Passphrase", layout=encr_passphrase, key="-PASSPHRASE-", size=(600, 170), visible=False)
+        sg.Frame("Recipients", layout=encr_recipient, key="-ENCRYPT-RECIPIENTS-", size=(600,170)),
+        sg.Frame("Passphrase", layout=encr_passphrase, key="-ENCRYPT-PASSPHRASE-", size=(600, 170), visible=False)
     ],
     [
         sg.Frame("Actions", layout=encr_actions, size=(600,120))
@@ -238,19 +238,14 @@ def main():
     window.refresh()
     window.move_to_center()
 
-    # # test
-    # multiline = window['-RECIPIENTS-']
-    # widget = multiline.Widget
-    # widget.tag_config('COMMENT', foreground='grey')
-    print("XXX")
-
     while True:
         event, values = window.read()
-        print("Event: ", event, "    Values: ", values)
+        #print("Event: ", event, "    Values: ", values)
 
         if event in {sg.WIN_CLOSED, "Exit"}:
             break
 
+        # TODO: submit is match
         # passphrase/confirm match background coloring
         if event.startswith("-CONFIRM"):
             type = event.split("-")[2] # -CONFIRM-KEY- -> KEY
@@ -258,6 +253,7 @@ def main():
                 window[f"-CONFIRM-{type}-"].update(background_color="yellow")
             else:
                 window[f"-CONFIRM-{type}-"].update(background_color="white")
+                window[f"-PASSPHRASE-{type}-"].update(values[f"-CONFIRM-{type}-"])
 
         #################################################
         ################## IDENTITY #####################
@@ -281,10 +277,11 @@ def main():
         if event == "-GENERATE-":
             comment = values["-COMMENT-"] \
                 if ("-COMMENT-" in values and values["-COMMENT-"]) else ""
-            # keydata comment-pubkey
+
             key = generate_key(comment)
-            for k, v in key.items():
-                window[f"-{k.upper()}-"].update(v)
+            if key:
+                for k, v in key.items():
+                    window[f"-{k.upper()}-"].update(v)
                 window["-PUBKEY-NOTE-"].update("Public key to share with other users:")
                 window["-PUBKEY-NOTE-"].update(visible=True)
 
@@ -294,13 +291,13 @@ def main():
                 keydata = f.read()
                 type = detect_age(keydata)
 
-            if not type == "plain": # encrypted key found!
-                askpass = sg.popup_get_text("Enter passphrase: ", password_char="*")
+            if type == "scrypt": # encrypted key found!
                 while True:
-                    decrypted = decr_passphrase(keydata, askpass)
+                    askpass = sg.popup_get_text("Enter passphrase: ", password_char="*")
+                    decrypted = decrypt_passphrase(keydata, askpass)
                     if decrypted:
                         keydata = decrypted
-                        continue
+                        break
 
             keydata = bytes.decode(keydata, encoding="utf-8") # convert to string now
 
@@ -313,6 +310,11 @@ def main():
                     key["keydata"]
                 )
             )
+
+            if decrypted: # the key file was decrypted, remember for saving if requested
+                window["-PASSPHRASE-KEY-"].update(askpass)
+                window["-CONFIRM-KEY-"].update(askpass)
+
             window["-PUBKEY-NOTE-"].update("Public key to share with other users:")
             window["-PUBKEY-NOTE-"].update(visible=True)
 
@@ -363,6 +365,21 @@ def main():
         ################# ENCRYPTION ####################
         #################################################
 
+        encrypt_mode_radios = [
+            "-ENCRYPT-PASSPHRASE-RADIO-",
+            "-ENCRYPT-RECIPIENTS-RADIO-"
+        ]
+
+        if event in encrypt_mode_radios: # reacting on radio button change
+
+            deactivate = encrypt_mode_radios[0] \
+                if encrypt_mode_radios[0] != event else encrypt_mode_radios[1]
+
+            # make layout visible/hidden
+            window[event.removesuffix("RADIO-")].update(visible=True)
+            window[deactivate.removesuffix("RADIO-")].update(visible=False)
+
+
         # TODO: localize right click menu text
         if event == "Paste recipients":
             text = window["-RECIPIENTS-"]
@@ -398,28 +415,22 @@ def main():
                     f"{found_int} recipients found.", title="")
 
 
-        encr_modes = ["-ENCRYPT-PASSPHRASE-", "-ENCRYPT-RECIPIENT-"]
-        if event in encr_modes:
-            deactivate = encr_modes[0] if encr_modes[0] != event \
-                else encr_modes[1]
-            window[event.removeprefix("-ENCRYPT")].update(visible=True)
-            window[deactivate.removeprefix("-ENCRYPT")].update(visible=False)
+        if event == "-ENCRYPT-": # 'Encrypt' button clicked
 
-
-        if event == "-ENCRYPT-":
-
-            if not values["-IN-PLAINFILE-"]:
+            if not values["-PLAINFILE-"]:
                 sg.popup_error("No files to encrypt are defined!")
                 continue
 
-            if values["-ENCR-RECIPIENT-"]:
-                good_recipient = valid_recipient(values["-RECIPIENTS-"])
+            if window["-ENCRYPT-RECIPIENTS-"].visible: # encrypting for recipients
 
-                if not good_recipient:
+                if values["-RECIPIENTS-"]:
+                    recipients = get_recipients(values["-RECIPIENTS-"])
+
+                if not recipients:
                     sg.popup_error("No recipient found!")
                     continue
 
-                encrypted = encrypt_recipient(good_recipient, values["-IN-PLAINFILE-"])
+                encrypted = encrypt_recipients(recipients, values["-PLAINFILE-"])
                 outfile = sg.popup_get_file("", save_as=True, no_window=True)
                 try:
                     with open(outfile, "w+b") as f:
@@ -428,16 +439,21 @@ def main():
                 except:
                     sg.popup_error("Error to save the file!")
 
-            elif values["-ENCR-PASSPHRASE-"]:
+            elif window["-ENCRYPT-PASSPHRASE-"].visible: # encrypt with passphrase
 
-                # passphrase / confirm match check
-                if window["-PASSPHRASE-ENCRYPT-"].get() != window["-CONFIRM-ENCRYPT-"].get():
+                # passphrase exists?
+                if not all(key in values for key in ("-PASSPHRASE-ENCRYPT-", "-CONFIRM-ENCRYPT-")):
+                    sg.popup_error("Passphrase and confirmation is needed!")
+                    continue
+
+                # passphrase / confirm match?
+                if not values["-PASSPHRASE-ENCRYPT-"] == values["-CONFIRM-ENCRYPT-"]:
                     sg.popup_error("Passphrase does not match!")
                     continue
 
                 encrypted = encrypt_passphrase(
                     window["-PASSPHRASE-ENCRYPT-"].get(),
-                    values["-IN-PLAINFILE-"]
+                    values["-PLAINFILE-"]
                 )
                 outfile = sg.popup_get_file("", save_as=True, no_window=True)
                 if outfile:

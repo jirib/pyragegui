@@ -27,7 +27,7 @@ def detect_age(data):
                 return "scrypt"
 
 
-def decr_passphrase(ciphertext, passphrase):
+def decrypt_passphrase(ciphertext, passphrase):
     """
     Decrypts a encrypted text (bytes) and returns bytes.
 

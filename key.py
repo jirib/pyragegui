@@ -211,6 +211,7 @@ def save_private(keydata, filename, passphrase=""):
 
     comments = []
     created = None
+    pubkey = None
 
     lines = [x for x in keydata.splitlines()]
     for line in lines:
@@ -220,8 +221,10 @@ def save_private(keydata, filename, passphrase=""):
             pubkey = line
         elif line.startswith("AGE-SECRET-KEY-"):
             key = line
-        else:
+        elif line.startswith("#"):
             comments.append(line)
+        else:
+            continue # ignoring every other line
 
     comment = comments[0] if comments else "" # only one line comment!
 
@@ -232,8 +235,12 @@ def save_private(keydata, filename, passphrase=""):
             datetime.now().astimezone().replace(microsecond=0).isoformat()
         )
 
+    if not pubkey:
+        pubkey = str(pyrage.x25519.Identity.from_str(key).to_public())
+        pubkey = f"# public key: {pubkey}"
+        
     out = "{}{}\n{}\n{}\n".format(
-        f"# {comment}\n" if comment else "",
+        f"{comment}\n" if comment else "", # comment already has '#'
         created,
         pubkey,
         key

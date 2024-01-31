@@ -17,21 +17,29 @@ def encrypt_passphrase(passphrase, filename):
     return encrypted
 
 
-def encrypt_recipient(recipient, filename):
+def encrypt_recipients(recipients, filename):
     """
     Encrypts a file to one or more recipients.
 
     Params:
-        recipient (list): List of valid recipients Recipient objects
+        recipient (string): Text with already validated recipients, optionally
+        with comments
 
     Returns:
         encrypted (bytes): Encrypted bytes
     """
 
+    # create list of recipients objects types
+    recipients_list = [
+        pyrage.x25519.Recipient.from_str(x) for x in recipients.splitlines() \
+            if x.startswith("age1")
+    ]
 
     with open(filename, 'r+b') as f:
-        encrypted = pyrage.encrypt(f.read(), recipient)
+        input = f.read()
+        encrypted = pyrage.encrypt(input, recipients_list)
     return encrypted
+
 
 def load_recipients(files):
     """
