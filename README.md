@@ -37,7 +37,7 @@ TODO
 - [x] (file) select a file for encryption
 - [ ] (input) have a multiline form to enter an input text to encrypt
 - [x] (outfile) encrypt to an output file
-- [?]  (armor) encrypt input to the armor format
+- [ ]  (armor) encrypt input to the armor format
 
 ### Decrypt
 
