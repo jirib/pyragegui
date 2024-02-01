@@ -1,4 +1,6 @@
 import PySimpleGUI as sg
+import gettext
+import locale
 import os
 import sys
 
@@ -6,6 +8,17 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '.'))
 from key import *
 from encrypt import *
 from decrypt import *
+
+user_language, encoding = locale.getlocale()
+
+supported_languages = {"en_US": "en", "cs_CZ": "cs"}
+lang = supported_languages.get(user_language, "en")
+
+cwd = os.path.dirname(os.path.realpath(__file__))
+lang_path = f"{cwd}/locale/"
+
+translation = gettext.translation("pyragegui", localedir=lang_path, languages=[lang])
+translation.install()
 
 recipients_rmenu = ["", ["Paste recipients"]]
 identities_rmenu = ["", ["Paste identities"]]
